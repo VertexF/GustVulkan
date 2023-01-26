@@ -111,7 +111,7 @@ namespace
     {
         { {  0.f,  -0.5f }, { 1.f, 0.f, 0.f } },
         { {  0.5f,  0.5f }, { 0.f, 1.f, 0.f } },
-        { { -0.5f,  0.5f }, { 0.f, 1.f, 1.f } }
+        { { -0.5f,  0.5f }, { 0.f, 0.f, 1.f } }
     };
 }
 
@@ -857,32 +857,22 @@ namespace Gust
     {
         GUST_PROFILE_FUNCTION();
 
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(vertices[0]) * vertices.size();
-        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
 
-        VkResult result = vkCreateBuffer(_device, &bufferInfo, nullptr, &_vertexBuffer);
-        GUST_CORE_ASSERT("Failed to create vertex buffer.", result != VK_SUCCESS);
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
-        VkMemoryRequirements memRequirements;
-        vkGetBufferMemoryRequirements(_device, _vertexBuffer, &memRequirements);
+        void* data = nullptr;
+        vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, vertices.data(), static_cast<size_t>(bufferSize));
+        vkUnmapMemory(_device, stagingBufferMemory);
 
-        VkMemoryAllocateInfo allocateInfo{};
-        allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocateInfo.allocationSize = memRequirements.size;
-        allocateInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _vertexBuffer, _vertexBufferMemory);
+        copyBuffer(stagingBuffer, _vertexBuffer, bufferSize);
 
-        result = vkAllocateMemory(_device, &allocateInfo, nullptr, &_vertexBufferMemory);
-        GUST_CORE_ASSERT("Failed to allocate vertex buffer memory.", result != VK_SUCCESS);
-
-        vkBindBufferMemory(_device, _vertexBuffer, _vertexBufferMemory, 0);
-
-        void* data;
-        vkMapMemory(_device, _vertexBufferMemory, 0, bufferInfo.size, 0, &data);
-        memcpy(data, vertices.data(), static_cast<uint32_t>(bufferInfo.size));
-        vkUnmapMemory(_device, _vertexBufferMemory);
+        vkDestroyBuffer(_device, stagingBuffer, nullptr);
+        vkFreeMemory(_device, stagingBufferMemory, nullptr);
     }
 
     void WindowsWindow::createCommandBuffers() 
@@ -1117,6 +1107,65 @@ namespace Gust
         }
 
         return true;
+    }
+
+    void WindowsWindow::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
+    {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = usage;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VkResult result = vkCreateBuffer(_device, &bufferInfo, nullptr, &buffer);
+        GUST_CORE_ASSERT("Failed to create vertex buffer.", result != VK_SUCCESS);
+
+        VkMemoryRequirements memRequirements;
+        vkGetBufferMemoryRequirements(_device, buffer, &memRequirements);
+
+        VkMemoryAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocateInfo.allocationSize = memRequirements.size;
+        allocateInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+        result = vkAllocateMemory(_device, &allocateInfo, nullptr, &bufferMemory);
+        GUST_CORE_ASSERT("Failed to allocate vertex buffer memory.", result != VK_SUCCESS);
+
+        vkBindBufferMemory(_device, buffer, bufferMemory, 0);
+    }
+
+    void WindowsWindow::copyBuffer(VkBuffer sourceBuffer, VkBuffer destBuffer, VkDeviceSize size)
+    {
+        VkCommandBufferAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocateInfo.commandPool = _commandPool;
+        allocateInfo.commandBufferCount = 1;
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(_device, &allocateInfo, &commandBuffer);
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        VkBufferCopy copyRegion{};
+        copyRegion.size = size;
+        vkCmdCopyBuffer(commandBuffer, sourceBuffer, destBuffer, 1, &copyRegion);
+
+        vkEndCommandBuffer(commandBuffer);
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        vkQueueSubmit(_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(_graphicsQueue);
+
+        vkFreeCommandBuffers(_device, _commandPool, 1, &commandBuffer);
     }
 
     bool WindowsWindow::checkDeviceExtensionSupport(VkPhysicalDevice device) 

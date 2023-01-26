@@ -93,6 +93,8 @@ namespace Gust
         QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
         std::vector<const char*> getRequiredExtensions();
         bool checkValidationLayerSupport();
+        void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
+        void copyBuffer(VkBuffer sourceBuffer, VkBuffer destBuffer, VkDeviceSize size);
         bool checkDeviceExtensionSupport(VkPhysicalDevice device);
         uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
         void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
