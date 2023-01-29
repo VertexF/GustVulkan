@@ -71,10 +71,18 @@ namespace Gust
         void createSwapChain();
         void createImageView();
         void createRenderPass();
+        void createDescriptionSetLayout();
         void createGraphicsPipeline();
         void createFramebuffers();
         void createCommandPool();
+        void createTextureImage();
+        void createTextureImageView();
+        void createTextureSampler();
         void createVertexBuffer();
+        void createIndexBuffer();
+        void createUniformBuffers();
+        void createDescriptorPool();
+        void createDescriptorSets();
         void createCommandBuffers();
         void createSyncObjects();
 
@@ -93,9 +101,18 @@ namespace Gust
         QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
         std::vector<const char*> getRequiredExtensions();
         bool checkValidationLayerSupport();
+
+        void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+        void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+        void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+        VkImageView createImageView(VkImage image, VkFormat format);
+
         void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
+        VkCommandBuffer beginSingleTimeCommands();
+        void endSingleTimeCommand(VkCommandBuffer commandBuffer);
         void copyBuffer(VkBuffer sourceBuffer, VkBuffer destBuffer, VkDeviceSize size);
         bool checkDeviceExtensionSupport(VkPhysicalDevice device);
+        void updateUniformBuffer(uint32_t currentImage);
         uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
         void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 
@@ -128,15 +145,29 @@ namespace Gust
         std::vector<VkFramebuffer> _swapChainFramebuffers;
 
         VkRenderPass _renderPass;
+        VkDescriptorSetLayout _descriptorSetLayout;
         VkPipelineLayout _pipelineLayout;
         VkPipeline _graphicsPipeline;
 
         VkCommandPool _commandPool;
 
+        VkImage _textureImage;
+        VkDeviceMemory _textureImageMemory;
+        VkImageView _textureImageView;
+        VkSampler _textureSampler;
+
         VkBuffer _vertexBuffer;
         VkDeviceMemory _vertexBufferMemory;
+        VkBuffer _indexBuffer;
+        VkDeviceMemory _indexBufferMemory;
 
+        std::vector<VkBuffer> _uniformBuffers;
+        std::vector<VkDeviceMemory> _uniformBufferMemory;
+        std::vector<void*> _uniformBufferMapped;
         std::vector<VkCommandBuffer> _commandBuffers;
+
+        VkDescriptorPool _descriptorPool;
+        std::vector<VkDescriptorSet> _descriptorSets;
 
         std::vector<VkSemaphore> _imageAvailableSemaphores;
         std::vector<VkSemaphore> _renderFinishedSemaphores;

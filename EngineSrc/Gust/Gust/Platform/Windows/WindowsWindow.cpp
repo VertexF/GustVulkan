@@ -1,8 +1,9 @@
+#include "PreComp.h"
 #include "WindowsWindow.h"
 
-#include "PreComp.h"
-
+#define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "Gust/Events/ApplicationEvents.h"
 #include "Gust/Events/KeyEvents.h"
@@ -16,6 +17,7 @@
 #include <optional>
 #include <limits>
 #include <array>
+#include <chrono>
 
 namespace
 {
@@ -78,6 +80,7 @@ namespace
     {
         glm::vec2 pos;
         glm::vec3 colour;
+        glm::vec2 texCoord;
 
         static VkVertexInputBindingDescription getBindindDescription() 
         {
@@ -89,11 +92,11 @@ namespace
             return bindingDescription;
         }
 
-        static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() 
+        static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() 
         {
-            std::array<VkVertexInputAttributeDescription, 2> attributeDescription{};
-
+            std::array<VkVertexInputAttributeDescription, 3> attributeDescription{};
             attributeDescription[0].binding = 0;
+
             attributeDescription[0].location = 0;
             attributeDescription[0].format = VK_FORMAT_R32G32_SFLOAT;
             attributeDescription[0].offset = offsetof(Vertex, pos);
@@ -103,15 +106,33 @@ namespace
             attributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
             attributeDescription[1].offset = offsetof(Vertex, colour);
 
+            attributeDescription[2].binding = 0;
+            attributeDescription[2].location = 2;
+            attributeDescription[2].format = VK_FORMAT_R32G32_SFLOAT;
+            attributeDescription[2].offset = offsetof(Vertex, texCoord);
+
             return attributeDescription;
         }
     };
 
+    struct UniformBufferObject 
+    {
+        alignas(16) glm::mat4 model;
+        alignas(16) glm::mat4 view;
+        alignas(16) glm::mat4 proj;
+    };
+
     const std::vector<Vertex> vertices = 
     {
-        { {  0.f,  -0.5f }, { 1.f, 0.f, 0.f } },
-        { {  0.5f,  0.5f }, { 0.f, 1.f, 0.f } },
-        { { -0.5f,  0.5f }, { 0.f, 0.f, 1.f } }
+        { { -0.5f,  -0.5f }, { 1.f, 0.f, 0.f }, { 1.f, 0.f } },
+        { {  0.5f,  -0.5f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f } },
+        { {  0.5f,   0.5f }, { 0.f, 0.f, 1.f }, { 0.f, 1.f } },
+        { { -0.5f,   0.5f }, { 0.f, 1.f, 0.f }, { 1.f, 1.f } }
+    };
+
+    const std::vector<uint16_t> indices =
+    {
+        0, 1, 2, 2, 3, 0
     };
 }
 
@@ -271,6 +292,23 @@ namespace Gust
         vkDestroyPipelineLayout(_device, _pipelineLayout, nullptr);
         vkDestroyRenderPass(_device, _renderPass, nullptr);
 
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) 
+        {
+            vkDestroyBuffer(_device, _uniformBuffers[i], nullptr);
+            vkFreeMemory(_device, _uniformBufferMemory[i], nullptr);
+        }
+        vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
+
+        vkDestroySampler(_device, _textureSampler, nullptr);
+        vkDestroyImageView(_device, _textureImageView, nullptr);
+
+        vkDestroyImage(_device, _textureImage, nullptr);
+        vkFreeMemory(_device, _textureImageMemory, nullptr);
+
+        vkDestroyDescriptorSetLayout(_device, _descriptorSetLayout, nullptr);
+
+        vkDestroyBuffer(_device, _indexBuffer, nullptr);
+        vkFreeMemory(_device, _indexBufferMemory, nullptr);
         vkDestroyBuffer(_device, _vertexBuffer, nullptr);
         vkFreeMemory(_device, _vertexBufferMemory, nullptr);
 
@@ -354,6 +392,8 @@ namespace Gust
         }
         GUST_CORE_ASSERT("Failed to acquire swap chain image!", result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR);
 
+        updateUniformBuffer(_currentFrame);
+
         vkResetCommandBuffer(_commandBuffers[_currentFrame], /*VkCommandBufferResetFlagBits*/ 0);
         recordCommandBuffer(_commandBuffers[_currentFrame], imageIndex);
 
@@ -415,10 +455,18 @@ namespace Gust
         createSwapChain();
         createImageView();
         createRenderPass();
+        createDescriptionSetLayout();
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
+        createTextureImage();
+        createTextureImageView();
+        createTextureSampler();
         createVertexBuffer();
+        createIndexBuffer();
+        createUniformBuffers();
+        createDescriptorPool();
+        createDescriptorSets();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -539,6 +587,7 @@ namespace Gust
         }
 
         VkPhysicalDeviceFeatures deviceFeatures{};
+        deviceFeatures.samplerAnisotropy = VK_TRUE;
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -632,23 +681,7 @@ namespace Gust
 
         for (size_t i = 0; i < _swapChainImages.size(); i++)
         {
-            VkImageViewCreateInfo createInfo{};
-            createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            createInfo.image = _swapChainImages[i];
-            createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            createInfo.format = _swapChainImageFormat;
-            createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-            createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-            createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-            createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-            createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            createInfo.subresourceRange.baseMipLevel = 0;
-            createInfo.subresourceRange.levelCount = 1;
-            createInfo.subresourceRange.baseArrayLayer = 0;
-            createInfo.subresourceRange.layerCount = 1;
-
-            VkResult result = vkCreateImageView(_device, &createInfo, nullptr, &_swapChainImageViews[i]);
-            GUST_CORE_ASSERT("Failed to create image view", result != VK_SUCCESS);
+            _swapChainImageViews[i] = createImageView(_swapChainImages[i], _swapChainImageFormat);
         }
     }
 
@@ -693,6 +726,32 @@ namespace Gust
 
         VkResult result = vkCreateRenderPass(_device, &renderPassInfo, nullptr, &_renderPass);
         GUST_CORE_ASSERT("Failed to create render pass!", result != VK_SUCCESS);
+    }
+
+    void WindowsWindow::createDescriptionSetLayout()
+    {
+        VkDescriptorSetLayoutBinding uniformBufferLayoutBinding{};
+        uniformBufferLayoutBinding.binding = 0;
+        uniformBufferLayoutBinding.descriptorCount = 1;
+        uniformBufferLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uniformBufferLayoutBinding.pImmutableSamplers = nullptr;
+        uniformBufferLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+        VkDescriptorSetLayoutBinding samplerLayoutBinding{};
+        samplerLayoutBinding.binding = 1;
+        samplerLayoutBinding.descriptorCount = 1;
+        samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        samplerLayoutBinding.pImmutableSamplers = nullptr;
+        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        std::array<VkDescriptorSetLayoutBinding, 2> binding = { uniformBufferLayoutBinding, samplerLayoutBinding };
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = static_cast<uint32_t>(binding.size());
+        layoutInfo.pBindings = binding.data();
+
+        VkResult result = vkCreateDescriptorSetLayout(_device, &layoutInfo, nullptr, &_descriptorSetLayout);
+        GUST_CORE_ASSERT("Failed to create descriptor", result != VK_SUCCESS);
     }
 
     void WindowsWindow::createGraphicsPipeline()
@@ -749,7 +808,7 @@ namespace Gust
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         rasterizer.depthBiasEnable = VK_FALSE;
 
         VkPipelineMultisampleStateCreateInfo multisampling{};
@@ -785,8 +844,8 @@ namespace Gust
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutInfo.setLayoutCount = 0;
-        pipelineLayoutInfo.pushConstantRangeCount = 0;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &_descriptorSetLayout;
 
         VkResult result = vkCreatePipelineLayout(_device, &pipelineLayoutInfo, nullptr, &_pipelineLayout);
         GUST_CORE_ASSERT("Failed to create pipeline layout.", result != VK_SUCCESS);
@@ -853,6 +912,65 @@ namespace Gust
         GUST_CORE_ASSERT("Failed to create command pool", result != VK_SUCCESS);
     }
 
+    void WindowsWindow::createTextureImage()
+    {
+        GUST_PROFILE_FUNCTION();
+
+        int texWidth = -1, texHeight = -1, textChannels = -1;
+        stbi_uc* pixels = stbi_load("Assets/Textures/snake.png", &texWidth, &texHeight, &textChannels, STBI_rgb_alpha);
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
+        GUST_CORE_ASSERT("Failed to load texture image", pixels != nullptr);
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data = nullptr;
+        vkMapMemory(_device, stagingBufferMemory, 0, imageSize, 0, &data);
+        memcpy(data, pixels, static_cast<size_t>(imageSize));
+        vkUnmapMemory(_device, stagingBufferMemory);
+
+        stbi_image_free(pixels);
+
+        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _textureImage, _textureImageMemory);
+
+        transitionImageLayout(_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        copyBufferToImage(stagingBuffer, _textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+        transitionImageLayout(_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        vkDestroyBuffer(_device, stagingBuffer, nullptr);
+        vkFreeMemory(_device, stagingBufferMemory, nullptr);
+    }
+
+    void WindowsWindow::createTextureImageView() 
+    {
+        _textureImageView = createImageView(_textureImage, VK_FORMAT_R8G8B8A8_SRGB);
+    }
+
+    void WindowsWindow::createTextureSampler() 
+    {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(_physicalDevice, &properties);
+
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.anisotropyEnable = VK_TRUE;
+        samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+        samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        samplerInfo.unnormalizedCoordinates = VK_FALSE;
+        samplerInfo.compareEnable = VK_FALSE;
+        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+        VkResult result = vkCreateSampler(_device, &samplerInfo, nullptr, &_textureSampler);
+        GUST_CORE_ASSERT("Failed to create texture sampler.", result != VK_SUCCESS);
+    }
+
     void WindowsWindow::createVertexBuffer()
     {
         GUST_PROFILE_FUNCTION();
@@ -873,6 +991,109 @@ namespace Gust
 
         vkDestroyBuffer(_device, stagingBuffer, nullptr);
         vkFreeMemory(_device, stagingBufferMemory, nullptr);
+    }
+
+    void WindowsWindow::createIndexBuffer()
+    {
+        GUST_PROFILE_FUNCTION();
+
+        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data = nullptr;
+        vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, indices.data(), static_cast<size_t>(bufferSize));
+        vkUnmapMemory(_device, stagingBufferMemory);
+
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _indexBuffer, _indexBufferMemory);
+        copyBuffer(stagingBuffer, _indexBuffer, bufferSize);
+
+        vkDestroyBuffer(_device, stagingBuffer, nullptr);
+        vkFreeMemory(_device, stagingBufferMemory, nullptr);
+    }
+
+    void WindowsWindow::createUniformBuffers() 
+    {
+        VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+        _uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        _uniformBufferMemory.resize(MAX_FRAMES_IN_FLIGHT);
+        _uniformBufferMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+        for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) 
+        {
+            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, _uniformBuffers[i], _uniformBufferMemory[i]);
+
+            vkMapMemory(_device, _uniformBufferMemory[i], 0, bufferSize, 0, &_uniformBufferMapped[i]);
+        }
+    }
+
+    void WindowsWindow::createDescriptorPool() 
+    {
+        std::array<VkDescriptorPoolSize, 2> poolSizes{};
+        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+        poolInfo.pPoolSizes = poolSizes.data();
+        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+        VkResult result = vkCreateDescriptorPool(_device, &poolInfo, nullptr, &_descriptorPool);
+        GUST_CORE_ASSERT("Failed to create descriptor pool.", result != VK_SUCCESS);
+    }
+
+    void WindowsWindow::createDescriptorSets() 
+    {
+        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, _descriptorSetLayout);
+
+        VkDescriptorSetAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocateInfo.descriptorPool = _descriptorPool;
+        allocateInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        allocateInfo.pSetLayouts = layouts.data();
+
+        _descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+        VkResult result = vkAllocateDescriptorSets(_device, &allocateInfo, _descriptorSets.data());
+        GUST_CORE_ASSERT("Failed to allocate descriptor sets.", result != VK_SUCCESS);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) 
+        {
+            VkDescriptorBufferInfo  bufferInfo{};
+            bufferInfo.buffer = _uniformBuffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(UniformBufferObject);
+
+            VkDescriptorImageInfo imageInfo{};
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo.imageView = _textureImageView;
+            imageInfo.sampler = _textureSampler;
+
+            std::array<VkWriteDescriptorSet, 2> writeDescriptorSets{};
+
+            writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptorSets[0].dstSet = _descriptorSets[i];
+            writeDescriptorSets[0].dstBinding = 0;
+            writeDescriptorSets[0].dstArrayElement = 0;
+            writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writeDescriptorSets[0].descriptorCount = 1;
+            writeDescriptorSets[0].pBufferInfo = &bufferInfo;
+
+            writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptorSets[1].dstSet = _descriptorSets[i];
+            writeDescriptorSets[1].dstBinding = 1;
+            writeDescriptorSets[1].dstArrayElement = 0;
+            writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writeDescriptorSets[1].descriptorCount = 1;
+            writeDescriptorSets[1].pImageInfo = &imageInfo;
+
+            vkUpdateDescriptorSets(_device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
+        }
     }
 
     void WindowsWindow::createCommandBuffers() 
@@ -1109,6 +1330,136 @@ namespace Gust
         return true;
     }
 
+
+    void WindowsWindow::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory)
+    {
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.extent.width = width;
+        imageInfo.extent.height = height;
+        imageInfo.extent.depth = 1;
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.format = format;
+        imageInfo.tiling = tiling;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageInfo.usage = usage;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VkResult result = vkCreateImage(_device, &imageInfo, nullptr, &image);
+        GUST_CORE_ASSERT("Failed to create image.", result != VK_SUCCESS);
+
+        VkMemoryRequirements memRequirements;
+        vkGetImageMemoryRequirements(_device, image, &memRequirements);
+
+        VkMemoryAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocateInfo.allocationSize = memRequirements.size;
+        allocateInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+        result = vkAllocateMemory(_device, &allocateInfo, nullptr, &imageMemory);
+        GUST_CORE_ASSERT("Failed to allocate image memory.", result != VK_SUCCESS);
+
+        vkBindImageMemory(_device, image, imageMemory, 0);
+    }
+
+    void WindowsWindow::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) 
+    {
+        VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = oldLayout;
+        barrier.newLayout = newLayout;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+
+        VkPipelineStageFlags sourceStage;
+        VkPipelineStageFlags destinationStage;
+
+        if(oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+        {
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+            sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        }
+        else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+        {
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+            sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+            destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        }
+        else 
+        {
+            GUST_CORE_ASSERT("Unsupported layout trasitional.", true);
+        }
+
+        vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 
+            0, 
+            0, nullptr, 
+            0, nullptr, 
+            1, &barrier);
+
+        endSingleTimeCommand(commandBuffer);
+    }
+
+    void WindowsWindow::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) 
+    {
+        VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+        VkBufferImageCopy region{};
+        region.bufferOffset = 0;
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = {0, 0, 0};
+        region.imageExtent = 
+        {
+            width, 
+            height,
+            1
+        };
+
+        vkCmdCopyBufferToImage(commandBuffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+        endSingleTimeCommand(commandBuffer);
+    }
+
+    VkImageView WindowsWindow::createImageView(VkImage image, VkFormat format)
+    {
+        VkImageViewCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        createInfo.image = image;
+        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        createInfo.format = format;
+        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = 1;
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.layerCount = 1;
+
+        VkImageView imageView;
+        VkResult result = vkCreateImageView(_device, &createInfo, nullptr, &imageView);
+        GUST_CORE_ASSERT("Failed to create image view", result != VK_SUCCESS);
+
+        return imageView;
+    }
+
     void WindowsWindow::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
     {
         VkBufferCreateInfo bufferInfo{};
@@ -1134,7 +1485,7 @@ namespace Gust
         vkBindBufferMemory(_device, buffer, bufferMemory, 0);
     }
 
-    void WindowsWindow::copyBuffer(VkBuffer sourceBuffer, VkBuffer destBuffer, VkDeviceSize size)
+    VkCommandBuffer WindowsWindow::beginSingleTimeCommands()
     {
         VkCommandBufferAllocateInfo allocateInfo{};
         allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1151,10 +1502,11 @@ namespace Gust
 
         vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
-        VkBufferCopy copyRegion{};
-        copyRegion.size = size;
-        vkCmdCopyBuffer(commandBuffer, sourceBuffer, destBuffer, 1, &copyRegion);
+        return commandBuffer;
+    }
 
+    void WindowsWindow::endSingleTimeCommand(VkCommandBuffer commandBuffer)
+    {
         vkEndCommandBuffer(commandBuffer);
 
         VkSubmitInfo submitInfo{};
@@ -1166,6 +1518,17 @@ namespace Gust
         vkQueueWaitIdle(_graphicsQueue);
 
         vkFreeCommandBuffers(_device, _commandPool, 1, &commandBuffer);
+    }
+
+    void WindowsWindow::copyBuffer(VkBuffer sourceBuffer, VkBuffer destBuffer, VkDeviceSize size)
+    {
+        VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+        VkBufferCopy copyRegion{};
+        copyRegion.size = size;
+        vkCmdCopyBuffer(commandBuffer, sourceBuffer, destBuffer, 1, &copyRegion);
+
+        endSingleTimeCommand(commandBuffer);
     }
 
     bool WindowsWindow::checkDeviceExtensionSupport(VkPhysicalDevice device) 
@@ -1185,6 +1548,22 @@ namespace Gust
         }
 
         return requiredExtension.empty();
+    }
+
+    void WindowsWindow::updateUniformBuffer(uint32_t currentImage)
+    {
+        static auto startTime = std::chrono::high_resolution_clock::now();
+
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+        UniformBufferObject uniformBufferObj;
+        uniformBufferObj.model = glm::rotate(glm::mat4(1.f), time * glm::radians(90.f), glm::vec3(0.f, 0.f, 1.f));
+        uniformBufferObj.view = glm::lookAt(glm::vec3(2.f, 2.f, 2.f), glm::vec3(0.f, 0.f, 0.f), glm::vec3(0.f, 0.f, 1.f));
+        uniformBufferObj.proj = glm::perspective(glm::radians(45.f), static_cast<float>(_swapChainExtent.width) / static_cast<float>(_swapChainExtent.height), 0.1f, 10.f);
+        uniformBufferObj.proj[1][1] *= -1;
+
+        memcpy(_uniformBufferMapped[currentImage], &uniformBufferObj, sizeof(uniformBufferObj));
     }
 
     uint32_t WindowsWindow::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) 
@@ -1245,7 +1624,11 @@ namespace Gust
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-        vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+        vkCmdBindIndexBuffer(commandBuffer, _indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[_currentFrame], 0, nullptr);
+
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
         vkCmdEndRenderPass(commandBuffer);
 
         result = vkEndCommandBuffer(commandBuffer);

@@ -26,11 +26,12 @@
 #include "Gust/Core/Log.h"
 #include "Gust/Debug/Instrumentor.h"
 
+#include "stb_image.h"
 #include "stb_truetype.h"
 
-#ifdef WIN32
-    #define WIN32_LEAN_AND_MEAN
-    #include <Windows.h>
-#endif
+//#ifdef WIN32
+//    #define WIN32_LEAN_AND_MEAN
+//    #include <Windows.h>
+//#endif
 
 #endif //PRECOMP_HDR
