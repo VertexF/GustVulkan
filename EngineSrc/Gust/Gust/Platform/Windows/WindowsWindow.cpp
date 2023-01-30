@@ -77,6 +77,9 @@ namespace
         }
     }
 
+    const std::string MODEL_PATH = "Assets/Models/viking_room.obj";
+    const std::string TEXTURE_PATH = "Assets/Textures/viking_room.png";
+
     struct Vertex 
     {
         glm::vec3 pos;
@@ -471,6 +474,7 @@ namespace Gust
         createTextureImageView();
         createTextureSampler();
         createVertexBuffer();
+        loadModel();
         createIndexBuffer();
         createUniformBuffers();
         createDescriptorPool();
@@ -1011,6 +1015,20 @@ namespace Gust
 
         VkResult result = vkCreateSampler(_device, &samplerInfo, nullptr, &_textureSampler);
         GUST_CORE_ASSERT("Failed to create texture sampler.", result != VK_SUCCESS);
+    }
+
+    void WindowsWindow::loadModel()
+    {
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warning, error;
+
+        bool result = tinyobj::LoadObj(&attrib, &shapes, &materials, &warning, &error, MODEL_PATH.c_str());
+        if (result == false) 
+        {
+            GUST_ERROR("Error : {0} Warning : {1}", warning, error);
+        }
     }
 
     void WindowsWindow::createVertexBuffer()

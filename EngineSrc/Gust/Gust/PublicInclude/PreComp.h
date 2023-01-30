@@ -28,6 +28,7 @@
 
 #include "stb_image.h"
 #include "stb_truetype.h"
+#include "tiny_obj_loader.h"
 
 //#ifdef WIN32
 //    #define WIN32_LEAN_AND_MEAN

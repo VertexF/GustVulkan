@@ -9,6 +9,7 @@ if(MSVC)
     set(SPDLOG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vender/spdlog/include")
     set(GML_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vender/glm")
     set(STB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vender/stb")
+    set(OBJ_LOADER_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vender/tiny_obj_loader)
     #I need to uses a config file that is generated here. So it's not a 
     #mistake it's a binrary directory.
     source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${GUST_SOURCE})
@@ -19,17 +20,23 @@ endif()
 
 add_subdirectory(vender/spdlog)
 add_subdirectory(vender/stb)
+add_subdirectory(vender/tiny_obj_loader)
 
 add_library(Gust STATIC ${GUST_SOURCE}) 
-
-#if(MSVC)
-#    set_property(TARGET Gust PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-#endif()
 
 add_compile_definitions("$<$<CONFIG:Debug>:GUST_DEBUG>")
 
 set(PRECOMPILED_HEADER Gust/PublicInclude)
 target_precompile_headers(Gust PUBLIC "${PRECOMPILED_HEADER}/PreComp.h")
 
-target_include_directories(Gust PUBLIC ${SPDLOG_INCLUDE_DIR} ${PRECOMPILED_HEADER} ${IMGUI_INCLUDE_DIR} ${GML_INCLUDE_DIR} ${GLFW_INCLUDE_DIR} ${STB_INCLUDE_DIR} ${VULKAN_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(Gust PUBLIC SPDLOG STB ${GLFW_LIB} ${VULKAN_LIB})
+target_include_directories(Gust PUBLIC ${SPDLOG_INCLUDE_DIR} 
+                                       ${PRECOMPILED_HEADER} 
+                                       ${IMGUI_INCLUDE_DIR} 
+                                       ${GML_INCLUDE_DIR} 
+                                       ${GLFW_INCLUDE_DIR} 
+                                       ${STB_INCLUDE_DIR} 
+                                       ${VULKAN_INCLUDE_DIR} 
+                                       ${OBJ_LOADER_INCLUDE_DIR} 
+                                       ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_link_libraries(Gust PUBLIC SPDLOG STB TINY_OBJ ${GLFW_LIB} ${VULKAN_LIB})

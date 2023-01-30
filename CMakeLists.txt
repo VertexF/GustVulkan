@@ -11,8 +11,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 file(GLOB_RECURSE GAME_SOURCE
     ${CMAKE_CURRENT_SOURCE_DIR}/GameSrc/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/GameSrc/*.h
-	${CMAKE_CURRENT_SOURCE_DIR}/GameSrc/*.vert
-	${CMAKE_CURRENT_SOURCE_DIR}/GameSrc/*.frag
+    ${CMAKE_CURRENT_SOURCE_DIR}/GameSrc/*.vert
+    ${CMAKE_CURRENT_SOURCE_DIR}/GameSrc/*.frag
 )
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -23,10 +23,6 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${GAME_SOURCE})
 add_subdirectory(EngineSrc/Gust)
 
 add_executable(Game ${GAME_SOURCE})
-
-#if(MSVC)
-#    set_property(TARGET Game PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-#endif()
 
 target_compile_options(Game PRIVATE
   $<$<CXX_COMPILER_ID:MSVC>:/W4>
