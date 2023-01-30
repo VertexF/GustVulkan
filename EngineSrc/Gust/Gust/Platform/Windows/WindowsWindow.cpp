@@ -2,6 +2,7 @@
 #include "WindowsWindow.h"
 
 #define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZEOR_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -78,7 +79,7 @@ namespace
 
     struct Vertex 
     {
-        glm::vec2 pos;
+        glm::vec3 pos;
         glm::vec3 colour;
         glm::vec2 texCoord;
 
@@ -98,7 +99,7 @@ namespace
             attributeDescription[0].binding = 0;
 
             attributeDescription[0].location = 0;
-            attributeDescription[0].format = VK_FORMAT_R32G32_SFLOAT;
+            attributeDescription[0].format = VK_FORMAT_R32G32B32_SFLOAT;
             attributeDescription[0].offset = offsetof(Vertex, pos);
 
             attributeDescription[1].binding = 0;
@@ -124,15 +125,21 @@ namespace
 
     const std::vector<Vertex> vertices = 
     {
-        { { -0.5f,  -0.5f }, { 1.f, 0.f, 0.f }, { 1.f, 0.f } },
-        { {  0.5f,  -0.5f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f } },
-        { {  0.5f,   0.5f }, { 0.f, 0.f, 1.f }, { 0.f, 1.f } },
-        { { -0.5f,   0.5f }, { 0.f, 1.f, 0.f }, { 1.f, 1.f } }
+        { { -0.5f,  -0.5f, 0.f }, { 1.f, 0.f, 0.f }, { 1.f, 0.f } },
+        { {  0.5f,  -0.5f, 0.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f } },
+        { {  0.5f,   0.5f, 0.f }, { 0.f, 0.f, 1.f }, { 0.f, 1.f } },
+        { { -0.5f,   0.5f, 0.f }, { 0.f, 1.f, 0.f }, { 1.f, 1.f } },
+
+        { { -0.5f,  -0.5f, -0.5f }, { 1.f, 0.f, 0.f }, { 1.f, 0.f } },
+        { {  0.5f,  -0.5f, -0.5f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f } },
+        { {  0.5f,   0.5f, -0.5f }, { 0.f, 0.f, 1.f }, { 0.f, 1.f } },
+        { { -0.5f,   0.5f, -0.5f }, { 0.f, 1.f, 0.f }, { 1.f, 1.f } }
     };
 
     const std::vector<uint16_t> indices =
     {
-        0, 1, 2, 2, 3, 0
+        0, 1, 2, 2, 3, 0,
+        4, 5, 6, 6, 7, 4
     };
 }
 
@@ -457,8 +464,9 @@ namespace Gust
         createRenderPass();
         createDescriptionSetLayout();
         createGraphicsPipeline();
-        createFramebuffers();
         createCommandPool();
+        createDepthResources();
+        createFramebuffers();
         createTextureImage();
         createTextureImageView();
         createTextureSampler();
@@ -679,9 +687,9 @@ namespace Gust
         GUST_PROFILE_FUNCTION();
         _swapChainImageViews.resize(_swapChainImages.size());
 
-        for (size_t i = 0; i < _swapChainImages.size(); i++)
+        for (uint32_t i = 0; i < _swapChainImages.size(); i++)
         {
-            _swapChainImageViews[i] = createImageView(_swapChainImages[i], _swapChainImageFormat);
+            _swapChainImageViews[i] = createImageView(_swapChainImages[i], _swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
         }
     }
 
@@ -698,27 +706,43 @@ namespace Gust
         colourAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         colourAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
+        VkAttachmentDescription depthAttachment{};
+        depthAttachment.format = findDepthFormat();
+        depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
         VkAttachmentReference colourAttachmentRef{};
         colourAttachmentRef.attachment = 0;
         colourAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference depthAttachmentRef{};
+        depthAttachmentRef.attachment = 1;
+        depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
         VkSubpassDescription subpass{};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &colourAttachmentRef;
+        subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
         VkSubpassDependency dependency{};
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
         dependency.dstSubpass = 0;
-        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.srcAccessMask = 0;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
+        std::array<VkAttachmentDescription, 2> attachments = { colourAttachment, depthAttachment };
         VkRenderPassCreateInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1;
-        renderPassInfo.pAttachments = &colourAttachment;
+        renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+        renderPassInfo.pAttachments = attachments.data();
         renderPassInfo.subpassCount = 1;
         renderPassInfo.pSubpasses = &subpass;
         renderPassInfo.dependencyCount = 1;
@@ -816,6 +840,14 @@ namespace Gust
         multisampling.sampleShadingEnable = VK_FALSE;
         multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_TRUE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+        depthStencil.depthBoundsTestEnable = VK_FALSE;
+        depthStencil.stencilTestEnable = VK_FALSE;
+
         VkPipelineColorBlendAttachmentState colourBlendAttachment{};
         colourBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
         colourBlendAttachment.blendEnable = VK_FALSE;
@@ -858,6 +890,7 @@ namespace Gust
         pipelineInfo.pInputAssemblyState = &inputAssembly;
         pipelineInfo.pViewportState = &viewportState;
         pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pDepthStencilState = &depthStencil;
         pipelineInfo.pMultisampleState = &multisampling;
         pipelineInfo.pColorBlendState = &colourBlending;
         pipelineInfo.pDynamicState = &dynamicState;
@@ -873,31 +906,6 @@ namespace Gust
         vkDestroyShaderModule(_device, vertexShaderModule, nullptr);
     }
 
-    void WindowsWindow::createFramebuffers()
-    {
-        _swapChainFramebuffers.resize(_swapChainImageViews.size());
-
-        for (size_t i = 0; i < _swapChainImageViews.size(); i++)
-        {
-            VkImageView attachments[] = 
-            {
-                _swapChainImageViews[i]
-            };
-
-            VkFramebufferCreateInfo framebufferInfo{};
-            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-            framebufferInfo.renderPass = _renderPass;
-            framebufferInfo.attachmentCount = 1;
-            framebufferInfo.pAttachments = attachments;
-            framebufferInfo.width = _swapChainExtent.width;
-            framebufferInfo.height = _swapChainExtent.height;
-            framebufferInfo.layers = 1;
-
-            VkResult result = vkCreateFramebuffer(_device, &framebufferInfo, nullptr, &_swapChainFramebuffers[i]);
-            GUST_CORE_ASSERT("Failed to create framebuffer", result != VK_SUCCESS);
-        }
-    }
-
     void WindowsWindow::createCommandPool() 
     {
         GUST_PROFILE_FUNCTION();
@@ -910,6 +918,40 @@ namespace Gust
 
         VkResult result = vkCreateCommandPool(_device, &poolInfo, nullptr, &_commandPool);
         GUST_CORE_ASSERT("Failed to create command pool", result != VK_SUCCESS);
+    }
+
+    void WindowsWindow::createFramebuffers()
+    {
+        _swapChainFramebuffers.resize(_swapChainImageViews.size());
+
+        for (size_t i = 0; i < _swapChainImageViews.size(); i++)
+        {
+            std::array<VkImageView, 2> attachments = 
+            {
+                _swapChainImageViews[i],
+                _depthImageView
+            };
+
+            VkFramebufferCreateInfo framebufferInfo{};
+            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            framebufferInfo.renderPass = _renderPass;
+            framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+            framebufferInfo.pAttachments = attachments.data();
+            framebufferInfo.width = _swapChainExtent.width;
+            framebufferInfo.height = _swapChainExtent.height;
+            framebufferInfo.layers = 1;
+
+            VkResult result = vkCreateFramebuffer(_device, &framebufferInfo, nullptr, &_swapChainFramebuffers[i]);
+            GUST_CORE_ASSERT("Failed to create framebuffer", result != VK_SUCCESS);
+        }
+    }
+
+    void WindowsWindow::createDepthResources()
+    {
+        VkFormat depthFormat = findDepthFormat();
+
+        createImage(_swapChainExtent.width, _swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _depthImage, _depthImageMemory);
+        _depthImageView = createImageView(_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
     }
 
     void WindowsWindow::createTextureImage()
@@ -944,7 +986,7 @@ namespace Gust
 
     void WindowsWindow::createTextureImageView() 
     {
-        _textureImageView = createImageView(_textureImage, VK_FORMAT_R8G8B8A8_SRGB);
+        _textureImageView = createImageView(_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
     void WindowsWindow::createTextureSampler() 
@@ -1440,14 +1482,14 @@ namespace Gust
         endSingleTimeCommand(commandBuffer);
     }
 
-    VkImageView WindowsWindow::createImageView(VkImage image, VkFormat format)
+    VkImageView WindowsWindow::createImageView(VkImage image, VkFormat format, VkImageAspectFlagBits aspectsFlags)
     {
         VkImageViewCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         createInfo.image = image;
         createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
         createInfo.format = format;
-        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        createInfo.subresourceRange.aspectMask = aspectsFlags;
         createInfo.subresourceRange.baseMipLevel = 0;
         createInfo.subresourceRange.levelCount = 1;
         createInfo.subresourceRange.baseArrayLayer = 0;
@@ -1458,6 +1500,41 @@ namespace Gust
         GUST_CORE_ASSERT("Failed to create image view", result != VK_SUCCESS);
 
         return imageView;
+    }
+
+    VkFormat WindowsWindow::findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling  tiling, VkFormatFeatureFlags features) 
+    {
+        for (VkFormat format : candidates) 
+        {
+            VkFormatProperties props;
+            vkGetPhysicalDeviceFormatProperties(_physicalDevice, format, &props);
+
+            if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features)
+            {
+                return format;
+            }
+            else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features)
+            {
+                return format;
+            }
+        }
+
+        GUST_CORE_ASSERT("Failed to find supported format.", true);
+    }
+
+    VkFormat WindowsWindow::findDepthFormat() 
+    {
+        return findSupportedFormat
+        (
+            { VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT },
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+        );
+    }
+
+    bool WindowsWindow::hadStencilComponent(VkFormat format) 
+    {
+        return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
     }
 
     void WindowsWindow::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
@@ -1598,9 +1675,12 @@ namespace Gust
         renderPassInfo.renderArea.offset = {0, 0};
         renderPassInfo.renderArea.extent = _swapChainExtent;
 
-        VkClearValue clearColour = { { { 0.0f, 0.0f, 0.f, 1.f } } };
-        renderPassInfo.clearValueCount = 1;
-        renderPassInfo.pClearValues = &clearColour;
+        std::array<VkClearValue, 2> clearValues{};
+        clearValues[0].color = { { 0.0f, 0.0f, 0.f, 1.f } };
+        clearValues[1].depthStencil = { 1.f, 0 };
+
+        renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+        renderPassInfo.pClearValues = clearValues.data();
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _graphicsPipeline);
@@ -1663,6 +1743,10 @@ namespace Gust
 
     void WindowsWindow::swapChainCleanUp()
     {
+        vkDestroyImageView(_device, _depthImageView, nullptr);
+        vkDestroyImage(_device, _depthImage, nullptr);
+        vkFreeMemory(_device, _depthImageMemory, nullptr);
+
         for (auto framebuffer : _swapChainFramebuffers)
         {
             vkDestroyFramebuffer(_device, framebuffer, nullptr);
@@ -1693,6 +1777,7 @@ namespace Gust
 
         createSwapChain();
         createImageView();
+        createDepthResources();
         createFramebuffers();
     }
 

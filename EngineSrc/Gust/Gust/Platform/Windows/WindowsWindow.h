@@ -73,8 +73,9 @@ namespace Gust
         void createRenderPass();
         void createDescriptionSetLayout();
         void createGraphicsPipeline();
-        void createFramebuffers();
         void createCommandPool();
+        void createDepthResources();
+        void createFramebuffers();
         void createTextureImage();
         void createTextureImageView();
         void createTextureSampler();
@@ -105,7 +106,11 @@ namespace Gust
         void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
         void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
         void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
-        VkImageView createImageView(VkImage image, VkFormat format);
+        VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlagBits aspectsFlags);
+
+        VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling  tiling, VkFormatFeatureFlags features);
+        VkFormat findDepthFormat();
+        bool hadStencilComponent(VkFormat format);
 
         void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
         VkCommandBuffer beginSingleTimeCommands();
@@ -150,6 +155,10 @@ namespace Gust
         VkPipeline _graphicsPipeline;
 
         VkCommandPool _commandPool;
+
+        VkImage _depthImage;
+        VkDeviceMemory _depthImageMemory;
+        VkImageView _depthImageView;
 
         VkImage _textureImage;
         VkDeviceMemory _textureImageMemory;
