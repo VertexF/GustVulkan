@@ -126,6 +126,7 @@ namespace Gust
         void createDescriptionSetLayout();
         void createGraphicsPipeline();
         void createCommandPool();
+        void createColourResources();
         void createDepthResources();
         void createFramebuffers();
         void createTextureImage();
@@ -157,12 +158,13 @@ namespace Gust
         bool checkValidationLayerSupport();
 
         void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
-        void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+        void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
         void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels);
         void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
         VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlagBits aspectsFlags, uint32_t mipLevels);
 
         VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling  tiling, VkFormatFeatureFlags features);
+        VkSampleCountFlagBits getMaxUsableSampleCount();
         VkFormat findDepthFormat();
         bool hadStencilComponent(VkFormat format);
 
@@ -191,6 +193,7 @@ namespace Gust
         VkSurfaceKHR _surface;
 
         VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
+        VkSampleCountFlagBits _msaaSamples = VK_SAMPLE_COUNT_1_BIT;
         VkDevice _device;
 
         VkQueue _graphicsQueue;
@@ -209,6 +212,10 @@ namespace Gust
         VkPipeline _graphicsPipeline;
 
         VkCommandPool _commandPool;
+
+        VkImage _colourImage;
+        VkDeviceMemory _colourImageMemory;
+        VkImageView _colourImageView;
 
         VkImage _depthImage;
         VkDeviceMemory _depthImageMemory;
